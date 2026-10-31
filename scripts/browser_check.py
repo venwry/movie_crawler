@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import shutil
 
 import httpx
 from playwright.sync_api import sync_playwright, expect
@@ -35,7 +36,9 @@ with tempfile.TemporaryDirectory() as directory:
                 time.sleep(.1)
             else:raise RuntimeError('Test server failed to start')
         with sync_playwright() as p:
-            browser=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH','/usr/bin/chromium'),headless=True,args=['--no-sandbox'])
+            browser_path = os.environ.get('CHROMIUM_PATH') or shutil.which('chromium') or shutil.which('chromium-browser')
+            # With no explicit/system executable, use Playwright's installed browser.
+            browser=p.chromium.launch(executable_path=browser_path,headless=True,args=['--no-sandbox'])
             page=browser.new_page(viewport={'width':1440,'height':1050})
             errors=[]
             page.on('pageerror',lambda e:errors.append(str(e)))
@@ -52,7 +55,7 @@ with tempfile.TemporaryDirectory() as directory:
             page.get_by_role('button',name='Arrival').click()
             page.locator('#film-flag').wait_for()
             assert page.locator('#film-flag').input_value()=='download'
-            page.screenshot(path='/tmp/movie-harbor-desktop.png',full_page=True)
+            page.screenshot(path=str(Path(tempfile.gettempdir()) / 'movie-harbor-desktop.png'),full_page=True)
             page.locator('#search').fill('no such film')
             page.get_by_role('heading',name='No matching films').wait_for()
             page.locator('#search').fill('')
@@ -64,7 +67,7 @@ with tempfile.TemporaryDirectory() as directory:
             assert page.locator('#cutoff').input_value()=='2026-10-20'
             page.locator('[data-close="scan-dialog"]').click()
             page.set_viewport_size({'width':390,'height':844})
-            page.screenshot(path='/tmp/movie-harbor-mobile.png',full_page=True)
+            page.screenshot(path=str(Path(tempfile.gettempdir()) / 'movie-harbor-mobile.png'),full_page=True)
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), page.evaluate("Array.from(document.querySelectorAll('body *')).filter(e => e.getBoundingClientRect().right > innerWidth).map(e => [e.tagName, e.className, e.getBoundingClientRect().right])")
             assert not errors,errors
             browser.close()

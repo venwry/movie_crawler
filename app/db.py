@@ -14,7 +14,9 @@ def connect():
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     db = sqlite3.connect(path, timeout=30)
-    os.chmod(path, 0o600)
+    if os.name != 'nt':
+        # Windows access is controlled by NTFS ACLs, not POSIX mode bits.
+        os.chmod(path, 0o600)
     db.row_factory = sqlite3.Row
     db.execute('PRAGMA foreign_keys=ON')
     try:

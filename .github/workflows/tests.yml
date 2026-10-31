@@ -1,0 +1,51 @@
+name: Application checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Windows setup and backend tests
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          & .\scripts\setup.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\.venv\Scripts\python.exe -m pytest -q
+          exit $LASTEXITCODE
+      - name: Windows startup smoke check
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $env:PORT = '18080'
+          $env:HOST = '127.0.0.1'
+          $scriptPath = Join-Path $PWD 'scripts\start.ps1'
+          $serverProcess = Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$scriptPath`"" -PassThru
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              if ($serverProcess.HasExited) { throw 'Startup script exited before readiness.' }
+              try {
+                $health = Invoke-RestMethod 'http://127.0.0.1:18080/api/health' -TimeoutSec 2
+                if ($health.status -eq 'ok') { $ready = $true; break }
+              } catch { Start-Sleep -Milliseconds 500 }
+            }
+            if (-not $ready) { throw 'Application did not become ready.' }
+            $catalog = Invoke-RestMethod 'http://127.0.0.1:18080/api/films'
+            if ($null -eq $catalog.films -or $catalog.total -ne 0) { throw 'Unexpected fresh catalog response.' }
+          } finally {
+            taskkill /PID $serverProcess.Id /T /F
+          }
+      - name: Linux setup and backend tests
+        if: runner.os == 'Linux'
+        run: |
+          bash scripts/setup.sh
+          .venv/bin/python -m pytest -q

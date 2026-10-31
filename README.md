@@ -2,16 +2,43 @@
 
 A local web application for discovering film releases and comparing them with a Plex movie library. Python 3.12+, FastAPI, SQLite, and a responsive vanilla JavaScript interface. No frontend build step or external database is needed.
 
-## Start on your computer or NAS
+## Windows 11: install and start
+
+1. Install **64-bit Python 3.12** (or newer) from [python.org](https://www.python.org/downloads/windows/). Include the Python launcher and select **Add python.exe to PATH** in the installer. Python 3.12 is the version used by the Windows CI checks.
+2. Download this repository using GitHub's **Code → Download ZIP**, then **Extract All** into a folder in your Windows user profile, or update your existing Git checkout. Run the scripts from the extracted folder, not from inside the ZIP. Folder names containing spaces are supported.
+3. Double-click **`setup.cmd`**. It creates `.venv`, installs the pinned dependencies, and checks them. Wait for **Setup complete**. Run it again after updating the application.
+4. Double-click **`start.cmd`**. Leave the terminal window open while using the app. In your browser, enter `http://localhost:8000`. Stop the server with **Ctrl+C**.
+5. In **Connections**, save your Plex URL/token, select your movie library, and sync it. Add an OMDb key for ratings.
+
+No Bash, WSL, Docker, Node.js, or PowerShell activation script is needed. The `.cmd` files use Windows' built-in PowerShell 5.1, with an execution-policy override limited to that one process; they do not change your system policy. On a managed PC where organizational policy blocks scripts, use the direct Python commands below or contact your administrator.
+
+You can also run the launchers from PowerShell in the project folder:
+
+```powershell
+.\setup.cmd
+.\start.cmd
+```
+
+Or run Python directly:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+```
+
+If Python is not found after installation, reopen the terminal. If port 8000 is occupied, stop the other copy of the app or use `$env:PORT = '8002'` before running `.\start.cmd`. A virtual environment copied from Linux/macOS cannot run on Windows: recreate only `.venv` using `setup.cmd`, and keep your `data` folder. `tzdata` is included so Warsaw dates work on Windows.
+
+The default listener is localhost, so only your PC can connect. For another device on your LAN, set `$env:HOST = '0.0.0.0'` and supply `APP_PASSWORD` securely before starting; the login username is `admin`. If Windows Firewall asks about access, allow **Private networks** only when you intend LAN access. Use an HTTPS reverse proxy for remote access. Run **one Uvicorn worker**; jobs are serialized in-process.
+
+## Linux / macOS / NAS
 
 ```bash
 bash scripts/setup.sh
 bash scripts/start.sh
 ```
 
-Open the app on port **8000** on the machine where it runs. The default listener is localhost. To access it from another machine on your LAN, set `HOST=0.0.0.0` and `APP_PASSWORD` securely in your service configuration before running `scripts/start.sh`; the login username is `admin`. Use an HTTPS reverse proxy for remote access. Run **one Uvicorn worker**; jobs are serialized in-process.
-
-On Windows, create a virtual environment with `py -m venv .venv`, install `requirements.lock` using `.venv\Scripts\python -m pip install -r requirements.lock`, and launch `.venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`.
+Open the app on port **8000** on the machine where it runs. For LAN access, set `HOST=0.0.0.0` and `APP_PASSWORD` securely in your service configuration before running `scripts/start.sh`.
 
 ## Connect Plex
 
@@ -56,7 +83,7 @@ Lookups require a matching normalized title and year. Use the canonical OMDb tit
 - A release inherits film status unless overridden. An unmarked film currently in Plex is automatically owned.
 - The download list contains films with a film/release download flag. It is a shortlist: opening a source page does not automatically download files or send anything to a torrent client.
 
-SQLite data lives in `data/catalog.sqlite3`, outside Git. Stop the app before copying this file for a consistent backup. Credentials saved through the UI are stored in this database with file mode `0600`; the data directory is created with mode `0700`. They are not encrypted at rest. Use a private persistent volume on a NAS and protect backups. Environment variables override saved connection values:
+SQLite data lives in `data/catalog.sqlite3`, outside Git. Stop the app before copying this file for a consistent backup. Credentials saved through the UI are stored in this database and are not encrypted at rest. On Linux/macOS the database uses file mode `0600` and new data directories use `0700`. On Windows, access follows the folder's inherited NTFS permissions: keep the project in your private user profile, avoid shared/Public folders, and protect backups. Setup does not delete the database or saved settings. Environment variables override saved connection values:
 
 | Variable | Purpose |
 | --- | --- |
@@ -71,6 +98,14 @@ The app does not automatically load `.env` files. Supply variables through your 
 
 ## Development and verification
 
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+Linux/macOS:
+
 ```bash
 .venv/bin/python -m pytest -q
 node --check app/static/app.js
@@ -78,11 +113,21 @@ node --check app/static/app.js
 
 Tests exercise real SQLite persistence and HTTP routes, mocked HTTP integrations, cutoff boundaries, grouping, rescans, flags, Plex pagination and atomic replacement, ratings caching, and redirect credential isolation. Fixtures are synthetic and do not establish live-service compatibility.
 
-Optional browser checks (requires an installed Chromium and Playwright):
+The GitHub Actions workflow runs the backend suite on Windows and Linux, tests the Windows setup and startup scripts, and checks Warsaw timezone handling without system timezone files. CI results are separate from local Linux validation.
+
+Optional browser checks on Windows:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install playwright==1.51.0
+.\.venv\Scripts\python.exe -m playwright install chromium
+.\.venv\Scripts\python.exe scripts/browser_check.py
+```
+
+Optional browser checks on Linux/macOS (requires an installed Chromium or `python -m playwright install chromium`):
 
 ```bash
 .venv/bin/pip install playwright==1.51.0
 .venv/bin/python scripts/browser_check.py
 ```
 
-The browser check uses a temporary database and a separate local server. It never seeds sample data into your collection. API documentation is available at `/docs`. Runtime job history is stored in SQLite; interrupted jobs are marked at restart and can be run again. Dependencies are fully pinned in `requirements.lock`; `requirements.txt` records the direct dependencies.
+The browser check uses a temporary database and a separate local server. It never seeds sample data into your collection. Screenshots are saved in your OS temporary directory (`%TEMP%` on Windows). Set `CHROMIUM_PATH` to use a specific browser executable if needed. API documentation is available at `/docs`. Runtime job history is stored in SQLite; interrupted jobs are marked at restart and can be run again. Dependencies are fully pinned in `requirements.lock`; `requirements.txt` records the direct dependencies.
