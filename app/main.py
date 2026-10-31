@@ -16,7 +16,8 @@ from pydantic import BaseModel, Field
 
 from .db import connect, initialize, settings
 from .domain import FLAGS, normalize
-from .integrations import IntegrationError, now, scan, plex_libraries, sync_plex, enrich, SOURCES
+from .integrations import IntegrationError, now, plex_libraries, sync_plex, enrich, SOURCES
+from . import source_browser
 
 STATIC = Path(__file__).parent / 'static'
 executor = ThreadPoolExecutor(max_workers=1)
@@ -149,7 +150,40 @@ class ScanInput(BaseModel):
 
 @app.post('/api/scan')
 def start_scan(body: ScanInput):
-    return launch('scan', lambda progress: scan(body.cutoff, body.max_pages, progress))
+    return launch('scan', lambda progress: source_browser.scan_with_session(body.cutoff, body.max_pages, progress))
+
+
+@app.get('/api/source/status')
+def source_status():
+    return source_browser.status()
+
+
+@app.post('/api/source/login')
+def source_login():
+    return launch('source-login', source_browser.sign_in)
+
+
+@app.post('/api/source/continue')
+def source_continue():
+    source_browser.respond()
+    return {'ok': True}
+
+
+@app.post('/api/source/cancel')
+def source_cancel():
+    source_browser.respond(cancel=True)
+    return {'ok': True}
+
+
+@app.delete('/api/source/session')
+def source_logout():
+    if not job_lock.acquire(blocking=False):
+        raise HTTPException(409, 'Wait for the current operation to finish before clearing the session.')
+    try:
+        source_browser.clear_session()
+    finally:
+        job_lock.release()
+    return {'ok': True}
 
 
 @app.post('/api/plex/sync')
@@ -168,7 +202,7 @@ def start_ratings():
 @app.get('/api/jobs')
 def jobs():
     with connect() as db:
-        return [dict(r) for r in db.execute('SELECT * FROM jobs ORDER BY id DESC LIMIT 10')]
+        return [{**dict(r), 'browser_waiting': r['state'] == 'running' and source_browser.status()['waiting']} for r in db.execute('SELECT * FROM jobs ORDER BY id DESC LIMIT 10')]
 
 
 def decoded(row):

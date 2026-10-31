@@ -24,6 +24,14 @@ class IntegrationError(Exception):
     pass
 
 
+class SourceAccessRequired(IntegrationError):
+    """A human must sign in or complete a challenge in the local browser."""
+
+
+class SourceCancelled(IntegrationError):
+    pass
+
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -74,8 +82,6 @@ def number(text):
 
 def parse_listing(html, url, category):
     soup = BeautifulSoup(html, 'html.parser')
-    if soup.select_one('input[type=password]'):
-        raise IntegrationError('The source requires login; public listing access is unavailable.')
     entries = []
     rows = soup.select('tr, .torrent-row, .torrent-item, [data-torrent-id]')
     for row in rows:
@@ -112,6 +118,12 @@ def parse_listing(html, url, category):
                             size=size_match[0] if size_match else None, seeds=count('seeds'),
                             peers=count('peers'), recorded_at=recorded))
     if not entries:
+        # Many sites embed a login form in the header even on public listings.
+        # Only report access trouble after looking for usable film rows.
+        if soup.select_one('input[type=password]') or any(marker in html.lower() for marker in (
+            'captcha', 'cf-chl-', 'challenge-platform', 'verify you are human', 'just a moment',
+        )):
+            raise SourceAccessRequired('Source login or CAPTCHA is required. Open Connections → Sign in to source, complete it in the local browser, then scan again.')
         raise IntegrationError('No recognizable film rows found. The site may be blocked or its HTML layout may need an adapter update.')
     next_url = None
     for a in soup.select('a[href]'):
@@ -149,7 +161,7 @@ def save_entries(entries, cutoff):
     return count
 
 
-def scan(cutoff, max_pages, progress):
+def scan(cutoff, max_pages, progress, read_page=None):
     count = 0
     failures = []
     with client() as http:
@@ -161,7 +173,8 @@ def scan(cutoff, max_pages, progress):
                         raise IntegrationError('Repeated pagination URL; scan incomplete.')
                     visited.add(url)
                     progress(f'{category}: page {page + 1}; {count} entries processed')
-                    entries, next_url = parse_listing(fetch(http, url).text, url, category)
+                    html = read_page(url, category) if read_page else fetch(http, url).text
+                    entries, next_url = parse_listing(html, url, category)
                     count += save_entries(entries, cutoff)
                     # Traverse until a full page is old, tolerating pinned entries in mixed pages.
                     if all(date.fromisoformat(e['recorded_at']) <= cutoff for e in entries) or not next_url:
@@ -170,6 +183,8 @@ def scan(cutoff, max_pages, progress):
                     time.sleep(1)
                 else:
                     raise IntegrationError(f'Page limit ({max_pages}) reached; scan incomplete. Increase the limit and scan again.')
+            except SourceCancelled:
+                raise
             except (IntegrationError, httpx.HTTPError) as exc:
                 message = str(exc) if isinstance(exc, IntegrationError) else 'Network request failed; check network access.'
                 failures.append(f'{category}: {message}')

@@ -7,6 +7,8 @@ import sys
 import tempfile
 import time
 import shutil
+from contextlib import contextmanager
+from unittest.mock import patch
 
 import httpx
 from playwright.sync_api import sync_playwright, expect
@@ -70,8 +72,33 @@ with tempfile.TemporaryDirectory() as directory:
             page.screenshot(path=str(Path(tempfile.gettempdir()) / 'movie-harbor-mobile.png'),full_page=True)
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), page.evaluate("Array.from(document.querySelectorAll('body *')).filter(e => e.getBoundingClientRect().right > innerWidth).map(e => [e.tagName, e.className, e.getBoundingClientRect().right])")
             assert not errors,errors
+            # Exercise actual Chromium cookie persistence against intercepted synthetic
+            # source pages. No request is sent to the real website or CAPTCHA service.
+            from app import source_browser
+            source_html=(ROOT/'tests/fixtures/listing.html').read_text().split('<a rel="next"')[0]
+            prompts=[]
+            @contextmanager
+            def synthetic_source_browser():
+                saved=source_browser.session_path()
+                context=browser.new_context(storage_state=str(saved) if saved.exists() else None)
+                def respond(route):
+                    signed_in=any(c['name']=='synthetic-login' for c in context.cookies())
+                    route.fulfill(status=200,content_type='text/html',body=source_html if signed_in else '<form><input type="password"><p>CAPTCHA fixture</p></form>')
+                context.route('**/*',respond)
+                try:
+                    yield context
+                finally:
+                    context.close()
+            def synthetic_human(source_page, progress, message):
+                prompts.append(message)
+                source_page.context.add_cookies([{'name':'synthetic-login','value':'fixture-only','url':'https://devil-torrents.pl/'}])
+            with patch.object(source_browser,'browser_session',synthetic_source_browser), patch.object(source_browser,'wait_for_user',synthetic_human):
+                assert 'listing was recognized' in source_browser.sign_in(lambda _:None)
+                assert 'Scan complete' in source_browser.scan_with_session(date(2026,10,20),2,lambda _:None)
+                assert len(prompts)==1, 'Authenticated scanning should reuse the saved cookie.'
+            source_browser.clear_session()
             browser.close()
-        print('Browser checks passed: browse, details, flags, persistence, queue, search, dialogs, mobile layout; no JavaScript errors.')
+        print('Browser checks passed: browse, details, flags, persistence, queue, search, dialogs, mobile layout, and source cookie persistence against synthetic pages; no JavaScript errors.')
     finally:
         process.terminate()
         process.wait(timeout=10)

@@ -52,6 +52,8 @@ async function settingsOpen() {
   const s=await api('/settings');$('plex-url').value=s.plex_url;$('plex-token').value='';$('omdb-key').value='';
   $('plex-library').innerHTML=`<option value="">Select a library…</option>${s.plex_library?`<option value="${esc(s.plex_library)}" selected>Saved library ${esc(s.plex_library)}</option>`:''}`;
   $('connection-status').textContent=`Plex token: ${s.plex_token_set?'saved':'not set'} · OMDb key: ${s.omdb_key_set?'saved':'not set'}${s.environment_overrides.length?' · Environment overrides: '+s.environment_overrides.join(', '):''}`;
+  const source=await api('/source/status');
+  $('source-status').textContent=source.saved?'A source browser session is saved on this computer.':'No saved source session. Sign in below if scanning requires login.';
   $('settings-error').classList.add('hidden');$('settings-dialog').showModal();
  }catch(e){error(e.message);}
 }
@@ -66,8 +68,9 @@ async function poll() {
  try {
   const jobs=await api('/jobs');if(!jobs.length)return;
   const j=jobs[0];$('job').classList.remove('hidden');$('job').classList.toggle('failed',['failed','interrupted'].includes(j.state));
+  $('browser-controls').classList.toggle('hidden',!j.browser_waiting);
   $('job').textContent=`${j.state==='running'?'↻':j.state==='complete'?'✓':'!'} ${j.kind.toUpperCase()} · ${j.message}`;
-  for(const id of ['scan','ratings','sync-plex'])$(id).disabled=j.state==='running';
+  for(const id of ['scan','ratings','sync-plex','source-login','source-clear'])$(id).disabled=j.state==='running';
   if(state.job!==`${j.id}:${j.state}`){state.job=`${j.id}:${j.state}`;await load();}
  }catch(e){error(e.message);}
 }
@@ -90,6 +93,10 @@ let debounce; $('search').oninput=()=>{clearTimeout(debounce);debounce=setTimeou
 for(const id of ['year','genre','flag','category','sort'])$(id).onchange=()=>{state.page=1;load();};
 $('previous').onclick=()=>{state.page--;load();};$('next').onclick=()=>{state.page++;load();};
 $('connections').onclick=settingsOpen;
+$('source-login').onclick=async()=>{try{await send('/source/login');$('settings-dialog').close();await poll();}catch(e){settingsError(e);}};
+$('source-clear').onclick=async()=>{try{await send('/source/session',{},'DELETE');$('source-status').textContent='Saved source session cleared.';}catch(e){settingsError(e);}};
+$('source-continue').onclick=async()=>{try{await send('/source/continue');$('browser-controls').classList.add('hidden');}catch(e){error(e.message);}};
+$('source-cancel').onclick=async()=>{try{await send('/source/cancel');$('browser-controls').classList.add('hidden');}catch(e){error(e.message);}};
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
 $('settings-form').onsubmit=async e=>{e.preventDefault();try{await saveConnections();$('settings-dialog').close();}catch(err){settingsError(err);}};
 $('load-libraries').onclick=async()=>{try{await saveConnections();const libs=await api('/plex/libraries');const current=$('plex-library').value;$('plex-library').innerHTML='<option value="">Select a library…</option>'+libs.map(l=>`<option value="${esc(l.id)}">${esc(l.title)}</option>`).join('');if(libs.some(l=>l.id===current))$('plex-library').value=current;$('settings-error').classList.add('hidden');$('connection-status').textContent=`Connected. Found ${libs.length} movie libraries.`;}catch(e){settingsError(e);}};

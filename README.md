@@ -51,6 +51,19 @@ The app must be able to reach Plex from its own host. Running on your computer/N
 
 ## Discover films
 
+### Source login and CAPTCHA on Windows
+
+After updating, stop the application, run **setup.cmd** again to install browser support, then start it with **start.cmd**. Microsoft Edge must be installed (it is included with Windows 11).
+
+1. Open **Connections → Sign in to source**.
+2. A separate Edge window opens **on the computer running Movie Harbor**. Enter your website credentials directly there and complete any CAPTCHA manually. Movie Harbor does not store your username/password or solve/bypass challenges.
+3. Return to Movie Harbor and click **Continue** in the banner above the catalog. The app revisits the listing and saves the browser session locally. If the site still requires a challenge, it waits again. Each wait expires after 10 minutes; **Cancel** stops the operation.
+4. Run **Scan sources**. With a saved session, scans use a visible browser with those cookies. Keep it open. If another login/CAPTCHA is detected, the scan pauses; finish the challenge in that window and click **Continue** to resume the current page.
+
+The session is stored in `data/source-session.json` (or alongside `MOVIE_DB`) and is excluded from Git. Treat it as a credential: keep it private and never share it. **Clear saved session** in Connections removes Movie Harbor's saved cookies/local storage; it does not revoke the server-side session. Only one login/scan/sync job runs at a time. Clearing a session is blocked while a job runs. Without a saved session the scanner uses public HTTP access.
+
+The browser uses its own isolated context; it does not read your normal Edge profile. Run Movie Harbor interactively on your Windows desktop, not as a background service. On Linux/macOS, source sign-in needs a graphical desktop and Chromium (`.venv/bin/python -m playwright install chromium` if no system browser is installed). `CHROMIUM_PATH` can select a browser executable. On a NAS, the browser appears on the NAS's desktop, not a remote client's PC.
+
 **Scan sources** visits these four categories:
 
 - https://devil-torrents.pl/files/torrent/Filmy%20x265/h265
@@ -66,7 +79,7 @@ Films are grouped by normalized title and identical release year; conservative f
 
 ### Live-site validation limitation
 
-The cloud environment returned **proxy HTTP 403** for the requested website. The current HTML adapter is tested against clearly labeled synthetic fixtures, **not a captured page from devil-torrents.pl**. Actual selectors/pagination may need adjustment after a real page is accessible. It supports table/torrent rows, `/torrent/` detail links, column headers or seed/peer classes, ISO/Polish numeric dates, relative dates, and next links. Unknown layouts/dates and login pages cause explicit failures, never a false successful empty scan. It does not bypass login or anti-bot challenges.
+The cloud environment returned **proxy HTTP 403** for the requested website. The current HTML adapter is tested against clearly labeled synthetic fixtures, **not a captured page from devil-torrents.pl**. Actual selectors/pagination may need adjustment after a real page is accessible. It supports table/torrent rows, `/torrent/` detail links, column headers or seed/peer classes, ISO/Polish numeric dates, relative dates, and next links. A login widget alongside recognizable film rows does not block parsing. Login/challenge-only pages request human sign-in; unknown layouts/dates cause explicit failures, never a false successful empty scan. If a session is saved but rows remain unrecognized, the job explicitly reports that the adapter needs verification. Saving cookies does not establish that the live site can be scanned successfully.
 
 Custom cloud domain additions were saved for `devil-torrents.pl` and `www.omdbapi.com`; a draft save does not activate network access. Apply and publish the configuration through environment settings for subsequent cloud use. Local operation uses your normal network.
 
